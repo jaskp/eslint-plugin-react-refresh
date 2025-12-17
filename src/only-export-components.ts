@@ -78,15 +78,43 @@ export const onlyExportComponents: TSESLint.RuleModule<
       : undefined;
 
     const reactHOCs = ["memo", "forwardRef", ...customHOCs];
+    // Prevent pathological AST shapes from creating an endless traversal when
+    // walking nested HOC calls.
+    const maxHOCCalleeDepth = 20;
+    const isHOCCallee = (node: TSESTree.Expression): boolean => {
+      let current: TSESTree.Expression | null = node;
+      let depth = 0;
+      while (current) {
+        if (depth++ >= maxHOCCalleeDepth) return false;
+        if (current.type === "Identifier") {
+          return reactHOCs.includes(current.name);
+        }
+        if (
+          current.type === "MemberExpression"
+          && current.property.type === "Identifier"
+        ) {
+          return reactHOCs.includes(current.property.name);
+        }
+        if (current.type === "CallExpression") {
+          current = current.callee;
+        } else {
+          break;
+        }
+        depth += 1;
+      }
+      return false;
+    };
     const canBeReactFunctionComponent = (init: TSESTree.Expression | null) => {
       if (!init) return false;
       const jsInit = skipTSWrapper(init);
       if (jsInit.type === "ArrowFunctionExpression") return true;
       if (
         jsInit.type === "CallExpression"
-        && jsInit.callee.type === "Identifier"
       ) {
-        return reactHOCs.includes(jsInit.callee.name);
+        if (jsInit.callee.type === "Identifier") {
+          return reactHOCs.includes(jsInit.callee.name);
+        }
+        return isHOCCallee(jsInit.callee);
       }
       return false;
     };
@@ -160,20 +188,18 @@ export const onlyExportComponents: TSESLint.RuleModule<
         const isHOCCallExpression = (
           node: TSESTree.CallExpression,
         ): boolean => {
-          const isCalleeHOC =
-            // support for react-redux
-            // export default connect(mapStateToProps, mapDispatchToProps)(...)
-            (node.callee.type === "CallExpression"
-              && node.callee.callee.type === "Identifier"
-              && node.callee.callee.name === "connect")
-            // React.memo(...)
-            || (node.callee.type === "MemberExpression"
-              && node.callee.property.type === "Identifier"
-              && reactHOCs.includes(node.callee.property.name))
-            // memo(...)
-            || (node.callee.type === "Identifier"
-              && reactHOCs.includes(node.callee.name));
-          if (!isCalleeHOC) return false;
+          const calleeIsCallExpression = node.callee.type === "CallExpression";
+          const calleeIsConnectCallExpression =
+            calleeIsCallExpression
+            && node.callee.callee.type === "Identifier"
+            && node.callee.callee.name === "connect";
+          const calleeIsHOC = isHOCCallee(node.callee);
+          if (calleeIsCallExpression && calleeIsHOC) {
+            // Calls to a curried HOC should be treated as components even if
+            // the last argument isn't itself a component.
+            return node.arguments.length > 0;
+          }
+          if (!calleeIsConnectCallExpression && !calleeIsHOC) return false;
           if (node.arguments.length === 0) return false;
           const arg = skipTSWrapper(node.arguments[0]);
           switch (arg.type) {
