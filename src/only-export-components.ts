@@ -78,6 +78,19 @@ export const onlyExportComponents: TSESLint.RuleModule<
       : undefined;
 
     const reactHOCs = ["memo", "forwardRef", ...customHOCs];
+    const isHOCCallee = (node: TSESTree.Expression): boolean => {
+      if (node.type === "Identifier") return reactHOCs.includes(node.name);
+      if (
+        node.type === "MemberExpression"
+        && node.property.type === "Identifier"
+      ) {
+        return reactHOCs.includes(node.property.name);
+      }
+      if (node.type === "CallExpression") {
+        return isHOCCallee(node.callee);
+      }
+      return false;
+    };
     const canBeReactFunctionComponent = (init: TSESTree.Expression | null) => {
       if (!init) return false;
       const jsInit = skipTSWrapper(init);
@@ -166,15 +179,12 @@ export const onlyExportComponents: TSESLint.RuleModule<
             (node.callee.type === "CallExpression"
               && node.callee.callee.type === "Identifier"
               && node.callee.callee.name === "connect")
-            // React.memo(...)
-            || (node.callee.type === "MemberExpression"
-              && node.callee.property.type === "Identifier"
-              && reactHOCs.includes(node.callee.property.name))
-            // memo(...)
-            || (node.callee.type === "Identifier"
-              && reactHOCs.includes(node.callee.name));
+            || isHOCCallee(node.callee);
           if (!isCalleeHOC) return false;
           if (node.arguments.length === 0) return false;
+          if (node.callee.type === "CallExpression" && isHOCCallee(node.callee)) {
+            return true;
+          }
           const arg = skipTSWrapper(node.arguments[0]);
           switch (arg.type) {
             case "Identifier":

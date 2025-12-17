@@ -66,6 +66,16 @@ const valid = [
     code: "export const Foo = () => {}; export const Bar = styled.div`padding-bottom: 6px;`;",
   },
   {
+    name: "Curried custom HOC with object config",
+    code: "export const Flex = styled('div')({display: 'flex'});",
+    options: [{ customHOCs: ["styled"] }],
+  },
+  {
+    name: "Curried custom HOC default export",
+    code: "export default styled('div')({display: 'flex'});",
+    options: [{ customHOCs: ["styled"] }],
+  },
+  {
     name: "Direct export variable",
     code: "export const foo = 3;",
   },
